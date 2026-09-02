@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ポモドーロ・勉強タイマー（カスタム機能付き）</title>
+    <style>
+        :root {
+            --work-color: #ff6b6b;
+            --break-color: #4dadf7;
+        }
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f8f9fa;
+            transition: background-color 0.5s ease;
+        }
+        .container {
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            width: 320px;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+            color: #343a40;
+        }
+        #status {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--work-color);
+            margin-bottom: 20px;
+        }
+        #timer {
+            font-size: 72px;
+            font-weight: bold;
+            color: #212529;
+            margin: 10px 0;
+            font-variant-numeric: tabular-nums;
+        }
+        .progress-container {
+            width: 100%;
+            height: 8px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        #progress-bar {
+            width: 100%;
+            height: 100%;
+            background-color: var(--work-color);
+            transition: width 1s linear, background-color 0.5s ease;
+        }
+        
+        /* カスタム設定エリアのスタイル */
+        .settings-group {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 25px;
+            background: #f1f3f5;
+            padding: 15px;
+            border-radius: 12px;
+        }
+        .setting-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+        }
+        .setting-item label {
+            font-size: 12px;
+            color: #495057;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .setting-item input {
+            width: 80%;
+            padding: 6px;
+            font-size: 16px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .btn-group {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        button {
+            flex: 1;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        #start-btn { background-color: #2b8a3e; color: white; }
+        #stop-btn { background-color: #fcc419; color: #212529; }
+        #reset-btn { background-color: #868e96; color: white; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        input:disabled { opacity: 0.6; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="title">勉強タイマー</h1>
+        <div id="status">集中時間（25分）</div>
+        <div id="timer">25:00</div>
+        
+        <div class="progress-container">
+            <div id="progress-bar"></div>
+        </div>
+
+        <!-- 追加したカスタム設定エリア -->
+        <div class="settings-group">
+            <div class="setting-item">
+                <label for="work-input">集中 (分)</label>
+                <input type="number" id="work-input" value="25" min="1" max="180" onchange="applyCustomTime()">
+            </div>
+            <div class="setting-item">
+                <label for="break-input">休憩 (分)</label>
+                <input type="number" id="break-input" value="5" min="1" max="60" onchange="applyCustomTime()">
+            </div>
+        </div>
+        
+        <div class="btn-group">
+            <button id="start-btn" onclick="startTimer()">スタート</button>
+            <button id="stop-btn" onclick="stopTimer()" disabled>ストップ</button>
+            <button id="reset-btn" onclick="resetTimer()">リセット</button>
+        </div>
+    </div>
+
+    <script>
+        // 設定用入力欄の要素取得
+        const workInput = document.getElementById('work-input');
+        const breakInput = document.getElementById('break-input');
+
+        // デフォルト値
+        let workTime = parseInt(workInput.value) * 60;
+        let breakTime = parseInt(breakInput.value) * 60;
+
+        let timeLeft = workTime;
+        let totalTime = workTime;
+        let isWorking = true; // true: 勉強中, false: 休憩中
+        let timerId = null;
+
+        const timerDisplay = document.getElementById('timer');
+        const statusDisplay = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+
+        // 入力値が変更されたときに時間を更新する関数
+        function applyCustomTime() {
+            // 最低1分〜のバリデーション
+            let wMin = Math.max(1, parseInt(workInput.value) || 25);
+            let bMin = Math.max(1, parseInt(breakInput.value) || 5);
+            workInput.value = wMin;
+            breakInput.value = bMin;
+
+            workTime = wMin * 60;
+            breakTime = bMin * 60;
+
+            // タイマー停止中かつ最初の集中モードの時だけ画面表示を即座に更新
+            if (timerId === null && isWorking) {
+                timeLeft = workTime;
+                totalTime = workTime;
+                statusDisplay.textContent = `集中時間（${wMin}分）`;
+                updateDisplay();
+            }
+        }
+
+        // 入力欄の活性・非活性を切り替える（タイマー動作中は変更不可にするため）
+        function toggleInputs(disabled) {
+            workInput.disabled = disabled;
+            breakInput.disabled = disabled;
+        }
+
+        // 画面の更新
+        function updateDisplay() {
+            let minutes = Math.floor(timeLeft / 60);
+            let seconds = timeLeft % 60;
+            timerDisplay.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            
+            // プログレスバーの計算
+            let percentage = (timeLeft / totalTime) * 100;
+            progressBar.style.width = `${percentage}%`;
+        }
+
+        // タイマー開始
+        function startTimer() {
+            if (timerId !== null) return;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            toggleInputs(true); // タイマー開始時に入力欄をロック
+
+            timerId = setInterval(() => {
+                if (timeLeft > 0) {
+                    timeLeft--;
+                    updateDisplay();
+                } else {
+                    // 時間切れの処理
+                    clearInterval(timerId);
+                    timerId = null;
+                    alert(isWorking ? "お疲れ様でした！リフレッシュしましょう。" : "休憩終了です！次の集中を始めましょう。");
+                    switchMode();
+                }
+            }, 1000);
+        }
+
+        // タイマー一時停止
+        function stopTimer() {
+            clearInterval(timerId);
+            timerId = null;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            toggleInputs(false); // 一時停止時に入力欄のロックを解除
+        }
+
+        // タイマーリセット
+        function resetTimer() {
+            stopTimer();
+            isWorking = true;
+            applyCustomTime(); // 現在の入力値に合わせてリセット
+            statusDisplay.style.color = "var(--work-color)";
+            progressBar.style.backgroundColor = "var(--work-color)";
+        }
+
+        // 勉強と休憩の切り替え
+        function switchMode() {
+            isWorking = !isWorking;
+            if (isWorking) {
+                timeLeft = workTime;
+                totalTime = workTime;
+                statusDisplay.textContent = `集中時間（${workInput.value}分）`;
+                statusDisplay.style.color = "var(--work-color)";
+                progressBar.style.backgroundColor = "var(--work-color)";
+            } else {
+                timeLeft = breakTime;
+                totalTime = breakTime;
+                statusDisplay.textContent = `休憩時間（${breakInput.value}分）`;
+                statusDisplay.style.color = "var(--break-color)";
+                progressBar.style.backgroundColor = "var(--break-color)";
+            }
+            updateDisplay();
+            startTimer(); // 自動で次のモードを開始
+        }
+
+        // 初期表示
+        applyCustomTime();
+    </script>
+</body>
+</html>
